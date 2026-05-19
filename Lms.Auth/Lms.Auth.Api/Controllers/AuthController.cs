@@ -1,0 +1,93 @@
+﻿using System.Security.Claims;
+using Lms.Auth.Application.DTOs;
+using Lms.Auth.Application.Services;
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Mvc;
+
+namespace Lms.Auth.Api.Controllers;
+
+[ApiController]
+[Route("api/[controller]")]
+[Produces("application/json")]
+public class AuthController : ControllerBase
+{
+    private readonly AuthService _authService;
+
+    public AuthController(AuthService authService) => _authService = authService;
+
+    /// <summary>
+    /// Registers a new user account. Anonymous.
+    /// </summary>
+    [HttpPost("register")]
+    [AllowAnonymous]
+    public async Task<IActionResult> Register([FromBody] RegisterRequest request)
+    {
+        if (!ModelState.IsValid) return BadRequest(ModelState);
+
+        var result = await _authService.RegisterAsync(request);
+        if (result == null)
+            return Conflict(new { error = "email_taken", message = "An account with this email already exists." });
+
+        return CreatedAtAction(nameof(Validate), new { }, result);
+    }
+
+    /// <summary>
+    /// Authenticates a user and returns JWT tokens. Anonymous.
+    /// </summary>
+    [HttpPost("login")]
+    [AllowAnonymous]
+    public async Task<IActionResult> Login([FromBody] LoginRequest request)
+    {
+        if (!ModelState.IsValid) return BadRequest(ModelState);
+
+        var result = await _authService.LoginAsync(request);
+        if (result == null)
+            return Unauthorized(new { error = "invalid_credentials", message = "Invalid email or password." });
+
+        return Ok(result);
+    }
+
+    /// <summary>
+    /// Refreshes the access token using a valid refresh token. Anonymous.
+    /// </summary>
+    [HttpPost("refresh")]
+    [AllowAnonymous]
+    public async Task<IActionResult> Refresh([FromBody] string refreshToken)
+    {
+        if (string.IsNullOrWhiteSpace(refreshToken))
+            return BadRequest(new { error = "invalid_request", message = "Refresh token is required." });
+
+        var result = await _authService.RefreshTokenAsync(refreshToken);
+        if (result == null)
+            return Unauthorized(new { error = "invalid_refresh_token", message = "Invalid or expired refresh token." });
+
+        return Ok(result);
+    }
+
+    /// <summary>
+    /// Revokes the given refresh token, effectively logging the user out. Requires authentication.
+    /// </summary>
+    [HttpPost("logout")]
+    [Authorize]
+    public async Task<IActionResult> Logout([FromBody] string refreshToken)
+    {
+        await _authService.LogoutAsync(refreshToken);
+        return NoContent();
+    }
+
+    /// <summary>
+    /// Validates the current JWT and returns the user profile. Requires authentication.
+    /// </summary>
+    [HttpGet("validate")]
+    [Authorize]
+    public async Task<IActionResult> Validate()
+    {
+        var userIdClaim = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+        if (userIdClaim == null || !int.TryParse(userIdClaim, out var userId))
+            return Unauthorized();
+
+        var user = await _authService.ValidateTokenAsync(userId);
+        if (user == null) return Unauthorized();
+        return Ok(user);
+    }
+}
