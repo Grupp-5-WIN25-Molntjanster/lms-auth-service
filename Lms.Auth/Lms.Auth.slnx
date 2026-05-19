@@ -1,0 +1,10 @@
+<Solution>
+  <Folder Name="/tests/">
+    <Project Path="Lms.Auth.IntegrationTests/Lms.Auth.IntegrationTests.csproj" />
+    <Project Path="Lms.Auth.UnitTests/Lms.Auth.UnitTests.csproj"  />
+  </Folder>
+  <Project Path="Lms.Auth.Api/Lms.Auth.Api.csproj" />
+  <Project Path="Lms.Auth.Application/Lms.Auth.Application.csproj" />
+  <Project Path="Lms.Auth.Domain/Lms.Auth.Domain.csproj" />
+  <Project Path="Lms.Auth.Infrastructure/Lms.Auth.Infrastructure.csproj" />
+</Solution>
