@@ -32,6 +32,7 @@ public class AuthServiceTests
     private readonly Mock<IPasswordHasher> _passwordHasherMock;
     private readonly Mock<IJwtTokenGenerator> _jwtTokenGeneratorMock;
     private readonly Mock<IApplicationDbContext> _contextMock;
+    private readonly Mock<IServiceBusPublisher> _serviceBusPublisherMock;
 
     // ================================================================
     // System Under Test (The real AuthService, but with mocked dependencies)
@@ -50,6 +51,7 @@ public class AuthServiceTests
         _passwordHasherMock = new Mock<IPasswordHasher>();
         _jwtTokenGeneratorMock = new Mock<IJwtTokenGenerator>();
         _contextMock = new Mock<IApplicationDbContext>();
+        _serviceBusPublisherMock = new Mock<IServiceBusPublisher>();
 
         // Setup JWT token generator defaults (can be overridden per test)
         _jwtTokenGeneratorMock.Setup(j => j.AccessTokenExpirationMinutes).Returns(15);
@@ -61,7 +63,8 @@ public class AuthServiceTests
             _refreshTokenRepositoryMock.Object,   // Fake token repository
             _passwordHasherMock.Object,           // Fake password hasher
             _jwtTokenGeneratorMock.Object,        // Fake JWT generator
-            _contextMock.Object                   // Fake database context
+            _contextMock.Object,                // Fake database context
+            _serviceBusPublisherMock.Object     // Fake service bus publisher
         );
     }
 
