@@ -21,6 +21,7 @@ public class User : BaseEntity
         Role = role;
         IsActive = true;
         CreatedAt = DateTime.UtcNow;
+        EmailConfirmed = false;
     }
 
     public string Email { get; private set; } = null!;
@@ -31,9 +32,55 @@ public class User : BaseEntity
     public bool IsActive { get; private set; }
     public DateTime? LastLoginAt { get; private set; }
 
+    // ============================================================
+    // EMAIL VERIFICATION FIELDS
+    // ============================================================
+    public bool EmailConfirmed { get; private set; }
+    public string? VerificationCode { get; private set; }
+    public DateTime? VerificationCodeExpiresAt { get; private set; }
+
     // Navigation property: a user can have many refresh tokens.
     private readonly List<RefreshToken> _refreshTokens = new();
     public IReadOnlyCollection<RefreshToken> RefreshTokens => _refreshTokens.AsReadOnly();
+
+
+    // ============================================================
+    // EMAIL VERIFICATION METHODS
+    // ============================================================
+
+    /// <summary>
+    /// Sets a new verification code with expiry.
+    /// Code is valid for 1 hour.
+    /// </summary>
+    public void SetVerificationCode(string code, DateTime expiresAt)
+    {
+        VerificationCode = code;
+        VerificationCodeExpiresAt = expiresAt;
+        UpdatedAt = DateTime.UtcNow;
+    }
+
+    /// <summary>
+    /// Confirms the email and clears the verification code.
+    /// </summary>
+    public void ConfirmEmail()
+    {
+        EmailConfirmed = true;
+        VerificationCode = null;
+        VerificationCodeExpiresAt = null;
+        UpdatedAt = DateTime.UtcNow;
+    }
+
+    /// <summary>
+    /// Checks if the verification code has expired.
+    /// </summary>
+    public bool IsVerificationCodeExpired =>
+        VerificationCodeExpiresAt.HasValue && DateTime.UtcNow > VerificationCodeExpiresAt.Value;
+
+    /// <summary>
+    /// Whether the user can log in.
+    /// </summary>
+    public bool CanLogin => IsActive && EmailConfirmed;
+
 
     /// <summary>
     /// Records a successful login time.
