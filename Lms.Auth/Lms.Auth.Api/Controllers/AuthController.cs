@@ -32,6 +32,56 @@ public class AuthController : ControllerBase
     }
 
     /// <summary>
+    /// Verify email address using the code sent via email.
+    /// The Email Service (other student) sent the code.
+    /// </summary>
+    [HttpPost("verify-email")]
+    [AllowAnonymous]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    public async Task<IActionResult> VerifyEmail([FromBody] VerifyEmailRequest request)
+    {
+        if (!ModelState.IsValid)
+            return BadRequest(ModelState);
+
+        var result = await _authService.VerifyEmailAsync(request.Email, request.Code);
+
+        if (result)
+            return Ok(new { message = "Email verified successfully. You can now log in." });
+
+        return BadRequest(new
+        {
+            error = "verification_failed",
+            message = "Invalid or expired verification code. Please request a new one."
+        });
+    }
+
+    /// <summary>
+    /// Resend verification code to email.
+    /// Called when code expires or user didn't receive it.
+    /// </summary>
+    [HttpPost("resend-verification")]
+    [AllowAnonymous]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    public async Task<IActionResult> ResendVerification([FromBody] ResendVerificationRequest request)
+    {
+        if (!ModelState.IsValid)
+            return BadRequest(ModelState);
+
+        var result = await _authService.ResendVerificationCodeAsync(request.Email);
+
+        if (result)
+            return Ok(new { message = "Verification code sent. Please check your email." });
+
+        return BadRequest(new
+        {
+            error = "resend_failed",
+            message = "Unable to resend code. Email may already be verified or account not found."
+        });
+    }
+
+    /// <summary>
     /// Authenticates a user and returns JWT tokens. Anonymous.
     /// </summary>
     [HttpPost("login")]
