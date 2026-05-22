@@ -12,19 +12,22 @@ public class AuthService
     private readonly IPasswordHasher _passwordHasher;
     private readonly IJwtTokenGenerator _jwtTokenGenerator;
     private readonly IApplicationDbContext _context;
+    private readonly IServiceBusPublisher _serviceBusPublisher;
 
     public AuthService(
         IUserRepository userRepository,
         IRefreshTokenRepository refreshTokenRepository,
         IPasswordHasher passwordHasher,
         IJwtTokenGenerator jwtTokenGenerator,
-        IApplicationDbContext context)
+        IApplicationDbContext context,
+        IServiceBusPublisher serviceBusPublisher)
     {
         _userRepository = userRepository;
         _refreshTokenRepository = refreshTokenRepository;
         _passwordHasher = passwordHasher;
         _jwtTokenGenerator = jwtTokenGenerator;
         _context = context;
+        _serviceBusPublisher = serviceBusPublisher;
     }
 
     public async Task<TokenResponse?> RegisterAsync(RegisterRequest request)
@@ -36,11 +39,95 @@ public class AuthService
         var role = string.IsNullOrEmpty(request.Role) ? "Student" : request.Role;
         var user = new User(request.Email, passwordHash, request.FirstName, request.LastName, role);
 
+        // ============================================================
+        // Generate 6-digit verification code
+        // ============================================================
+        var random = new Random();
+        var code = random.Next(100000, 999999).ToString();
+        user.SetVerificationCode(code, DateTime.UtcNow.AddHours(1));
+
         _userRepository.Add(user);
         await _context.SaveChangesAsync();
 
-        return await GenerateTokensAsync(user);
+        // ============================================================
+        // Publish to Service Bus (Email Service picks this up)
+        // ============================================================
+        await _serviceBusPublisher.PublishVerificationEmailAsync(new VerificationMessage
+        {
+            UserId = user.Id,
+            Email = user.Email,
+            VerificationCode = code
+        });
+
+        // Return response WITHOUT tokens (must verify email first)
+        return new TokenResponse
+        {
+            AccessToken = "",
+            RefreshToken = "",
+            ExpiresAt = DateTime.UtcNow,
+            User = MapToUserResponse(user),
+            RequiresEmailVerification = true
+        };
     }
+
+    // ============================================================
+    // EMAIL VERIFICATION METHODS
+    // ============================================================
+
+    /// <summary>
+    /// Verifies email with the code sent to user.
+    /// Returns true if verification succeeded.
+    /// </summary>
+    public async Task<bool> VerifyEmailAsync(string email, string code)
+    {
+        var user = await _userRepository.GetByEmailAsync(email);
+        if (user == null)
+            return false;
+
+        if (user.EmailConfirmed)
+            return true; // Already verified
+
+        if (user.IsVerificationCodeExpired)
+            return false;
+
+        if (user.VerificationCode != code)
+            return false;
+
+        user.ConfirmEmail();
+        _userRepository.Update(user);
+        await _context.SaveChangesAsync();
+        return true;
+    }
+
+    /// <summary>
+    /// Generates a new verification code and publishes to Service Bus.
+    /// Used when user requests a new code.
+    /// </summary>
+    public async Task<bool> ResendVerificationCodeAsync(string email)
+    {
+        var user = await _userRepository.GetByEmailAsync(email);
+        if (user == null)
+            return false;
+
+        if (user.EmailConfirmed)
+            return false; // Already verified, no need to resend
+
+        var random = new Random();
+        var code = random.Next(100000, 999999).ToString();
+        user.SetVerificationCode(code, DateTime.UtcNow.AddHours(1));
+        _userRepository.Update(user);
+        await _context.SaveChangesAsync();
+
+        await _serviceBusPublisher.PublishVerificationEmailAsync(new VerificationMessage
+        {
+            UserId = user.Id,
+            Email = user.Email,
+            VerificationCode = code
+        });
+
+        return true;
+    }
+
 
     public async Task<TokenResponse?> LoginAsync(LoginRequest request)
     {
