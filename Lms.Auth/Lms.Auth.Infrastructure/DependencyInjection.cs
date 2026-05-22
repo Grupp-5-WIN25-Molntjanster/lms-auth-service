@@ -1,7 +1,8 @@
-﻿using Lms.Auth.Infrastructure;
-using Lms.Auth.Application.Interfaces;
+﻿using Lms.Auth.Application.Interfaces;
 using Lms.Auth.Application.Services;
 using Lms.Auth.Domain.Interfaces;
+using Lms.Auth.Infrastructure;
+using Lms.Auth.Infrastructure.Messaging;
 using Lms.Auth.Infrastructure.Persistence;
 using Lms.Auth.Infrastructure.Security;
 using Microsoft.EntityFrameworkCore;
@@ -34,6 +35,9 @@ public static class DependencyInjection
 
         // 4. Application Services
         services.AddScoped<AuthService>();
+
+        // 5. Service Bus Publisher (singleton - reusable connection)
+        services.AddSingleton<IServiceBusPublisher, ServiceBusPublisher>();
 
         return services;
     }
