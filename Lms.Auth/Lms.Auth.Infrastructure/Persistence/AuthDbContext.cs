@@ -31,6 +31,9 @@ public class AuthDbContext : DbContext, IApplicationDbContext
             entity.Property(e => e.LastName).IsRequired().HasMaxLength(100);
             entity.Property(e => e.Role).IsRequired().HasMaxLength(50);
             entity.Property(e => e.PasswordHash).IsRequired();
+            entity.Property(e => e.EmailConfirmed).IsRequired().HasDefaultValue(false);
+            entity.Property(e => e.VerificationCode).HasMaxLength(10);
+            entity.Property(e => e.VerificationCodeExpiresAt);
         });
 
         modelBuilder.Entity<RefreshToken>(entity =>
