@@ -15,6 +15,14 @@
 # User-specific files (MonoDevelop/Xamarin Studio)
 *.userprefs
 
+
+# Visual Studio / Azure publish service dependency files
+**/Properties/ServiceDependencies/
+**/Properties/serviceDependencies*.json
+
+# Local .NET tool manifest, ignore only if you do not intentionally use local tools
+**/dotnet-tools.json
+
 # Mono auto generated files
 mono_crash.*
 
