@@ -5,5 +5,5 @@ namespace Lms.Auth.Domain.Interfaces;
 public interface IRefreshTokenRepository : IRepository<RefreshToken>
 {
     Task<RefreshToken?> GetByTokenAsync(string token);
-    Task RemoveAllForUserAsync(int userId);
+    Task RemoveAllForUserAsync(Guid userId);
 }
