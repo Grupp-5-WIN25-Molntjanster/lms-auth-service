@@ -25,7 +25,7 @@ public class RefreshToken : BaseEntity
     public bool IsRevoked { get; private set; }
 
     // Foreign key back to the owning user.
-    public int UserId { get; private set; }
+    public Guid UserId { get; private set; }
     public User User { get; private set; } = null!;
 
     /// <summary>
