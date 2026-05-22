@@ -15,7 +15,7 @@ public class RefreshTokenRepository : Repository<RefreshToken>, IRefreshTokenRep
                            .FirstOrDefaultAsync(rt => rt.Token == token);
     }
 
-    public async Task RemoveAllForUserAsync(int userId)
+    public async Task RemoveAllForUserAsync(Guid userId)
     {
         var tokens = await _dbSet.Where(rt => rt.UserId == userId).ToListAsync();
         _dbSet.RemoveRange(tokens);
