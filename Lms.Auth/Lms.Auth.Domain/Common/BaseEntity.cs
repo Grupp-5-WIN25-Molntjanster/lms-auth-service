@@ -7,7 +7,7 @@
 /// </summary>
 public abstract class BaseEntity
 {
-    public int Id { get; protected set; }
+    public Guid Id { get; protected set; }
     public DateTime CreatedAt { get; protected set; } = DateTime.UtcNow;
     // Not every entity needs UpdatedAt, but it's here if we later add auditing.
     public DateTime? UpdatedAt { get; protected set; }
