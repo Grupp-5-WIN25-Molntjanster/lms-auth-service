@@ -14,9 +14,18 @@ builder.Host.UseSerilog((ctx, lc) =>
 
 builder.Services.AddInfrastructure(builder.Configuration);
 
-var jwtSecret = builder.Configuration["Jwt:Secret"]!;
-var jwtIssuer = builder.Configuration["Jwt:Issuer"]!;
-var jwtAudience = builder.Configuration["Jwt:Audience"]!;
+var jwtSecret = builder.Configuration["Jwt:Secret"];
+var jwtIssuer = builder.Configuration["Jwt:Issuer"];
+var jwtAudience = builder.Configuration["Jwt:Audience"];
+
+if (string.IsNullOrWhiteSpace(jwtSecret))
+    throw new InvalidOperationException("Jwt:Secret is missing.");
+
+if (string.IsNullOrWhiteSpace(jwtIssuer))
+    throw new InvalidOperationException("Jwt:Issuer is missing.");
+
+if (string.IsNullOrWhiteSpace(jwtAudience))
+    throw new InvalidOperationException("Jwt:Audience is missing.");
 
 builder.Services.AddAuthentication(options =>
 {
@@ -46,25 +55,44 @@ builder.Services.AddOpenApi();
 
 var app = builder.Build();
 
-using (var scope = app.Services.CreateScope())
+
+
+try
 {
+    using var scope = app.Services.CreateScope();
     var dbContext = scope.ServiceProvider.GetRequiredService<AuthDbContext>();
     dbContext.Database.Migrate();
 }
-
-if (app.Environment.IsDevelopment())
+catch (Exception ex)
 {
-    app.MapOpenApi();
-    app.MapScalarApiReference(options =>
-    {
-        options.Title = "LMS Auth Service";
-        options.Theme = ScalarTheme.Purple;
-    });
+    Log.Error(ex, "Database migration failed during startup");
+    throw;
 }
 
+
+app.MapGet("/", () => "LMS Auth API is running.");
+
+app.MapGet("/health", () => Results.Ok(new
+{
+    status = "Healthy",
+    environment = app.Environment.EnvironmentName,
+    time = DateTimeOffset.UtcNow
+}));
+
+app.MapOpenApi("/openapi/{documentName}.json");
+
+app.MapScalarApiReference("/scalar/v1", options =>
+{
+    options.Title = "LMS Auth Service";
+    options.Theme = ScalarTheme.Purple;
+    options.OpenApiRoutePattern = "/openapi/{documentName}.json";
+});
+
 app.UseSerilogRequestLogging();
+
 app.UseAuthentication();
 app.UseAuthorization();
+
 app.MapControllers();
 
 app.Run();
