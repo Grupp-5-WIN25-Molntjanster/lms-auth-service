@@ -6,4 +6,5 @@ public class TokenResponse
     public string RefreshToken { get; set; } = string.Empty;
     public DateTime ExpiresAt { get; set; }
     public UserResponse User { get; set; } = null!;
+    public bool RequiresEmailVerification { get; set; }
 }
