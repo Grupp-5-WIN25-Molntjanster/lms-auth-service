@@ -10,5 +10,5 @@ public class UserResponse
     public bool IsActive { get; set; }
     public DateTime CreatedAt { get; set; }
     public DateTime? LastLoginAt { get; set; }
-    public bool EmailConfirmed { get; private set; }
+    public bool EmailConfirmed { get; set; }
 }
