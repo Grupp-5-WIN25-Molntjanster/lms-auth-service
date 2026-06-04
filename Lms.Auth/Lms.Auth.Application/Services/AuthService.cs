@@ -12,7 +12,7 @@ public class AuthService
     private readonly IPasswordHasher _passwordHasher;
     private readonly IJwtTokenGenerator _jwtTokenGenerator;
     private readonly IApplicationDbContext _context;
-    private readonly IServiceBusPublisher _serviceBusPublisher;
+    private readonly IVerificationClient _verificationClient;
 
     public AuthService(
         IUserRepository userRepository,
@@ -20,15 +20,19 @@ public class AuthService
         IPasswordHasher passwordHasher,
         IJwtTokenGenerator jwtTokenGenerator,
         IApplicationDbContext context,
-        IServiceBusPublisher serviceBusPublisher)
+        IVerificationClient verificationClient)
     {
         _userRepository = userRepository;
         _refreshTokenRepository = refreshTokenRepository;
         _passwordHasher = passwordHasher;
         _jwtTokenGenerator = jwtTokenGenerator;
         _context = context;
-        _serviceBusPublisher = serviceBusPublisher;
+        _verificationClient = verificationClient;
     }
+
+    // ================================================================
+    // REGISTRATION – Send email to Service Bus, do NOT generate code
+    // ================================================================
 
     public async Task<TokenResponse?> RegisterAsync(RegisterRequest request)
     {
@@ -40,26 +44,25 @@ public class AuthService
         var user = new User(request.Email, passwordHash, request.FirstName, request.LastName, role);
 
         // ============================================================
-        // Generate 6-digit verification code
+        // Auth does NOT generate or store codes.
+        // Verification owns the code lifecycle. We just trigger a send.
         // ============================================================
-        var random = new Random();
-        var code = random.Next(100000, 999999).ToString();
-        user.SetVerificationCode(code, DateTime.UtcNow.AddHours(1));
 
         _userRepository.Add(user);
         await _context.SaveChangesAsync();
 
-        // ============================================================
-        // Publish to Service Bus (Email Service picks this up)
-        // ============================================================
-        await _serviceBusPublisher.PublishVerificationEmailAsync(new VerificationMessage
+        // Trigger verification via Verification service (HTTP).
+        // Wrapped so a transient Verification outage doesn't lose the new user —
+        // the account exists and the user can request a resend.
+        try
         {
-            UserId = user.Id,
-            Email = user.Email,
-            VerificationCode = code
-        });
+            await _verificationClient.SendVerificationAsync(user.Email);
+        }
+        catch
+        {
+            // TODO: log — user can hit /resend-verification
+        }
 
-        // Return response WITHOUT tokens (must verify email first)
         return new TokenResponse
         {
             AccessToken = "",
@@ -70,13 +73,13 @@ public class AuthService
         };
     }
 
-    // ============================================================
-    // EMAIL VERIFICATION METHODS
-    // ============================================================
+    // ================================================================
+    // VERIFY EMAIL – User enters code, Auth Service verifies it
+    // ================================================================
 
     /// <summary>
-    /// Verifies email with the code sent to user.
-    /// Returns true if verification succeeded.
+    /// Verifies the email using the code the user received.
+    /// Auth delegates the actual code check to the Verification service.
     /// </summary>
     public async Task<bool> VerifyEmailAsync(string email, string code)
     {
@@ -85,24 +88,21 @@ public class AuthService
             return false;
 
         if (user.EmailConfirmed)
-            return true; // Already verified
+            return true;
 
-        if (user.IsVerificationCodeExpired)
-            return false;
+        var isValid = await _verificationClient.ValidateCodeAsync(email, code);
 
-        if (user.VerificationCode != code)
-            return false;
+        if (isValid)
+        {
+            user.ConfirmEmail();
+            _userRepository.Update(user);
+            await _context.SaveChangesAsync();
+            return true;
+        }
 
-        user.ConfirmEmail();
-        _userRepository.Update(user);
-        await _context.SaveChangesAsync();
-        return true;
+        return false;
     }
 
-    /// <summary>
-    /// Generates a new verification code and publishes to Service Bus.
-    /// Used when user requests a new code.
-    /// </summary>
     public async Task<bool> ResendVerificationCodeAsync(string email)
     {
         var user = await _userRepository.GetByEmailAsync(email);
@@ -110,24 +110,12 @@ public class AuthService
             return false;
 
         if (user.EmailConfirmed)
-            return false; // Already verified, no need to resend
+            return false;
 
-        var random = new Random();
-        var code = random.Next(100000, 999999).ToString();
-        user.SetVerificationCode(code, DateTime.UtcNow.AddHours(1));
-        _userRepository.Update(user);
-        await _context.SaveChangesAsync();
-
-        await _serviceBusPublisher.PublishVerificationEmailAsync(new VerificationMessage
-        {
-            UserId = user.Id,
-            Email = user.Email,
-            VerificationCode = code
-        });
-
+        // Trigger another verification send via Verification service
+        await _verificationClient.SendVerificationAsync(user.Email);
         return true;
     }
-
 
     public async Task<TokenResponse?> LoginAsync(LoginRequest request)
     {
@@ -137,6 +125,21 @@ public class AuthService
 
         if (!user.IsActive)
             return null;
+
+        // ============================================================
+        // CHECK: Is email confirmed?
+        // ============================================================
+        if (!user.EmailConfirmed)
+        {
+            return new TokenResponse
+            {
+                AccessToken = "",
+                RefreshToken = "",
+                ExpiresAt = DateTime.UtcNow,
+                User = MapToUserResponse(user),
+                RequiresEmailVerification = true
+            };
+        }
 
         user.RecordLogin();
         _userRepository.Update(user);
@@ -171,7 +174,7 @@ public class AuthService
         }
     }
 
-    public async Task<UserResponse?> ValidateTokenAsync(int userId)
+    public async Task<UserResponse?> ValidateTokenAsync(Guid userId)
     {
         var user = await _userRepository.GetByIdAsync(userId);
         if (user == null || !user.IsActive)
@@ -201,6 +204,92 @@ public class AuthService
         };
     }
 
+    /// <summary>
+    /// Changes user's password after validating current password
+    /// </summary>
+    public async Task<ChangePasswordResponse> ChangePasswordAsync(Guid userId, ChangePasswordRequest request)
+    {
+        var response = new ChangePasswordResponse();
+
+        // 1. Validate input
+        if (string.IsNullOrWhiteSpace(request.CurrentPassword))
+        {
+            response.Success = false;
+            response.Message = "Current password is required.";
+            response.Errors.Add("current_password_required");
+            return response;
+        }
+
+        // 2. Validate new password meets requirements
+        if (!PasswordRequirements.IsValid(request.NewPassword, out var passwordErrors))
+        {
+            response.Success = false;
+            response.Message = "New password does not meet security requirements.";
+            response.Errors.AddRange(passwordErrors);
+            return response;
+        }
+
+        // 3. Check if new password matches confirmation
+        if (request.NewPassword != request.ConfirmNewPassword)
+        {
+            response.Success = false;
+            response.Message = "New password and confirmation do not match.";
+            response.Errors.Add("password_mismatch");
+            return response;
+        }
+
+        // 4. Prevent using the same password
+        if (request.CurrentPassword == request.NewPassword)
+        {
+            response.Success = false;
+            response.Message = "New password cannot be the same as current password.";
+            response.Errors.Add("same_password");
+            return response;
+        }
+
+        // 5. Get user
+        var user = await _userRepository.GetByIdAsync(userId);
+        if (user == null)
+        {
+            response.Success = false;
+            response.Message = "User not found.";
+            response.Errors.Add("user_not_found");
+            return response;
+        }
+
+        // 6. Verify current password
+        if (!_passwordHasher.Verify(request.CurrentPassword, user.PasswordHash))
+        {
+            response.Success = false;
+            response.Message = "Current password is incorrect.";
+            response.Errors.Add("invalid_current_password");
+            return response;
+        }
+
+        // 7. Check if account is active
+        if (!user.IsActive)
+        {
+            response.Success = false;
+            response.Message = "Account is deactivated. Cannot change password.";
+            response.Errors.Add("account_inactive");
+            return response;
+        }
+
+        // 8. Hash new password and update
+        var newPasswordHash = _passwordHasher.Hash(request.NewPassword);
+        user.UpdatePassword(newPasswordHash);
+
+        // 10. Save changes
+        _userRepository.Update(user);
+        await _context.SaveChangesAsync();
+
+        response.Success = true;
+        response.Message = "Password changed successfully. Please log in again with your new password.";
+
+        return response;
+    }
+
+
     private static UserResponse MapToUserResponse(User user)
     {
         return new UserResponse
@@ -211,6 +300,7 @@ public class AuthService
             LastName = user.LastName,
             Role = user.Role,
             IsActive = user.IsActive,
+            EmailConfirmed = user.EmailConfirmed,
             CreatedAt = user.CreatedAt,
             LastLoginAt = user.LastLoginAt
         };
