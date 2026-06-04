@@ -8,7 +8,7 @@ namespace Lms.Auth.Domain.Interfaces;
 /// </summary>
 public interface IRepository<T> where T : BaseEntity
 {
-    Task<T?> GetByIdAsync(int id);
+    Task<T?> GetByIdAsync(Guid id);
     Task<IEnumerable<T>> GetAllAsync();
     void Add(T entity);
     void Update(T entity);
