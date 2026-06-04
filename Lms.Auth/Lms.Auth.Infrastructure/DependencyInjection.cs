@@ -1,8 +1,7 @@
 ﻿using Lms.Auth.Application.Interfaces;
 using Lms.Auth.Application.Services;
 using Lms.Auth.Domain.Interfaces;
-using Lms.Auth.Infrastructure;
-using Lms.Auth.Infrastructure.Messaging;
+using Lms.Auth.Infrastructure.Clients;
 using Lms.Auth.Infrastructure.Persistence;
 using Lms.Auth.Infrastructure.Security;
 using Microsoft.EntityFrameworkCore;
@@ -16,28 +15,44 @@ public static class DependencyInjection
     public static IServiceCollection AddInfrastructure(
         this IServiceCollection services, IConfiguration configuration)
     {
-        // 1. Database
+        // Database
         services.AddDbContext<AuthDbContext>(options =>
             options.UseSqlServer(configuration.GetConnectionString("AuthDb")));
-
-        // Register the interface so application layer can use IApplicationDbContext
         services.AddScoped<IApplicationDbContext>(sp => sp.GetRequiredService<AuthDbContext>());
 
-        // 2. Repositories (generic + specific)
-        services.AddScoped(typeof(IRepository<>), typeof(Repository<>));
+        // Repositories
         services.AddScoped<IUserRepository, UserRepository>();
         services.AddScoped<IRefreshTokenRepository, RefreshTokenRepository>();
 
-        // 3. Security
+        // Security
         services.AddSingleton<IPasswordHasher, PasswordHasher>();
         services.AddScoped<IJwtTokenGenerator, JwtTokenGenerator>();
         services.Configure<JwtSettings>(configuration.GetSection(JwtSettings.SectionName));
 
-        // 4. Application Services
-        services.AddScoped<AuthService>();
+        // ============================================================
+        // Verification Service Client
+        // ============================================================
+        var verificationUrl = configuration["ServiceUrls:VerificationService"];
 
-        // 5. Service Bus Publisher (singleton - reusable connection)
-        services.AddSingleton<IServiceBusPublisher, ServiceBusPublisher>();
+        if (!string.IsNullOrWhiteSpace(verificationUrl))
+        {
+            // Real HTTP client when URL is configured
+            services.AddHttpClient<IVerificationClient, VerificationClient>(client =>
+            {
+                client.BaseAddress = new Uri(verificationUrl);
+                client.Timeout = TimeSpan.FromSeconds(10);
+                client.DefaultRequestHeaders.Add("Accept", "application/json");
+            });
+        }
+        else
+        {
+            // No URL configured – register a dummy client that does nothing
+            // This allows the app to run without the Verification Service
+            services.AddSingleton<IVerificationClient, NoOpVerificationClient>();
+        }
+
+        // Application Services
+        services.AddScoped<AuthService>();
 
         return services;
     }
