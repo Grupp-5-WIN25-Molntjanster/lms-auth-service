@@ -55,20 +55,21 @@ builder.Services.AddOpenApi();
 
 var app = builder.Build();
 
-
-
-try
+// Auto-migrate only on a real relational provider (skipped for InMemory tests).
+if (!app.Environment.IsEnvironment("Testing"))
 {
     using var scope = app.Services.CreateScope();
     var dbContext = scope.ServiceProvider.GetRequiredService<AuthDbContext>();
-    dbContext.Database.Migrate();
+    try
+    {
+        dbContext.Database.Migrate();
+    }
+    catch (Exception ex)
+    {
+        Log.Error(ex, "Database migration failed during startup");
+        throw;
+    }
 }
-catch (Exception ex)
-{
-    Log.Error(ex, "Database migration failed during startup");
-    throw;
-}
-
 
 app.MapGet("/", () => "LMS Auth API is running.");
 
@@ -96,3 +97,5 @@ app.UseAuthorization();
 app.MapControllers();
 
 app.Run();
+
+public partial class Program { }
