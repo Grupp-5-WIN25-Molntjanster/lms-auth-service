@@ -5,7 +5,10 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
   </PropertyGroup>
-
+	<!-- ADD THIS: Allow integration tests to access internal Program class -->
+	<ItemGroup>
+		<InternalsVisibleTo Include="Lms.Auth.IntegrationTests" />
+	</ItemGroup>
   <ItemGroup>
     <PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="10.0.8" />
     <PackageReference Include="Microsoft.AspNetCore.OpenApi" Version="10.0.8" />
