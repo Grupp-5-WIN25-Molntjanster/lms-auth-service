@@ -65,8 +65,6 @@ public class User : BaseEntity
     public void ConfirmEmail()
     {
         EmailConfirmed = true;
-        VerificationCode = null;
-        VerificationCodeExpiresAt = null;
         UpdatedAt = DateTime.UtcNow;
     }
 
@@ -106,5 +104,11 @@ public class User : BaseEntity
     {
         var token = _refreshTokens.FirstOrDefault(t => t.Token == tokenValue && !t.IsRevoked);
         token?.Revoke();
+    }
+
+    public void UpdatePassword(string newPasswordHash)
+    {
+        PasswordHash = newPasswordHash;
+        UpdatedAt = DateTime.UtcNow;
     }
 }
