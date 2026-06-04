@@ -1,8 +1,10 @@
-﻿using System.Security.Claims;
-using Lms.Auth.Application.DTOs;
+﻿using Lms.Auth.Application.DTOs;
+using Lms.Auth.Application.Interfaces;
 using Lms.Auth.Application.Services;
+using Lms.Auth.Domain.Interfaces;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using System.Security.Claims;
 
 namespace Lms.Auth.Api.Controllers;
 
@@ -12,8 +14,15 @@ namespace Lms.Auth.Api.Controllers;
 public class AuthController : ControllerBase
 {
     private readonly AuthService _authService;
+    private readonly IUserRepository _userRepository;
 
-    public AuthController(AuthService authService) => _authService = authService;
+
+    public AuthController(AuthService authService, IUserRepository userRepository)
+    {
+        _authService = authService;
+        _userRepository = userRepository;
+    }
+
 
     /// <summary>
     /// Registers a new user account. Anonymous.
@@ -32,13 +41,10 @@ public class AuthController : ControllerBase
     }
 
     /// <summary>
-    /// Verify email address using the code sent via email.
-    /// The Email Service (other student) sent the code.
+    /// Verify email with the code received from Email Service.
     /// </summary>
     [HttpPost("verify-email")]
     [AllowAnonymous]
-    [ProducesResponseType(StatusCodes.Status200OK)]
-    [ProducesResponseType(StatusCodes.Status400BadRequest)]
     public async Task<IActionResult> VerifyEmail([FromBody] VerifyEmailRequest request)
     {
         if (!ModelState.IsValid)
@@ -52,34 +58,27 @@ public class AuthController : ControllerBase
         return BadRequest(new
         {
             error = "verification_failed",
-            message = "Invalid or expired verification code. Please request a new one."
+            message = "Invalid verification code. Please check your email and try again."
         });
     }
 
     /// <summary>
-    /// Resend verification code to email.
-    /// Called when code expires or user didn't receive it.
+    /// Resend verification email. Delegates to the Verification service.
+    /// Returns a generic response so it cannot be used to enumerate accounts.
     /// </summary>
     [HttpPost("resend-verification")]
     [AllowAnonymous]
-    [ProducesResponseType(StatusCodes.Status200OK)]
-    [ProducesResponseType(StatusCodes.Status400BadRequest)]
     public async Task<IActionResult> ResendVerification([FromBody] ResendVerificationRequest request)
     {
         if (!ModelState.IsValid)
             return BadRequest(ModelState);
 
-        var result = await _authService.ResendVerificationCodeAsync(request.Email);
+        await _authService.ResendVerificationCodeAsync(request.Email);
 
-        if (result)
-            return Ok(new { message = "Verification code sent. Please check your email." });
-
-        return BadRequest(new
-        {
-            error = "resend_failed",
-            message = "Unable to resend code. Email may already be verified or account not found."
-        });
+        return Ok(new { message = "If an account exists for this email, a verification email has been sent." });
     }
+
+
 
     /// <summary>
     /// Authenticates a user and returns JWT tokens. Anonymous.
@@ -126,6 +125,37 @@ public class AuthController : ControllerBase
     }
 
     /// <summary>
+    /// Changes user's password. Requires authentication.
+    /// </summary>
+    [HttpPost("change-password")]
+    [Authorize]
+    public async Task<IActionResult> ChangePassword([FromBody] ChangePasswordRequest request)
+    {
+        // Validate model
+        if (!ModelState.IsValid)
+            return BadRequest(ModelState);
+
+        // Get user ID from JWT claims
+        var userIdClaim = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+        if (userIdClaim == null || !Guid.TryParse(userIdClaim, out var userId))
+            return Unauthorized(new { error = "invalid_token", message = "User not authenticated." });
+
+        var result = await _authService.ChangePasswordAsync(userId, request);
+
+        if (!result.Success)
+        {
+            return BadRequest(new
+            {
+                error = "password_change_failed",
+                message = result.Message,
+                details = result.Errors
+            });
+        }
+
+        return Ok(new { message = result.Message });
+    }
+
+    /// <summary>
     /// Validates the current JWT and returns the user profile. Requires authentication.
     /// </summary>
     [HttpGet("validate")]
@@ -133,7 +163,7 @@ public class AuthController : ControllerBase
     public async Task<IActionResult> Validate()
     {
         var userIdClaim = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
-        if (userIdClaim == null || !int.TryParse(userIdClaim, out var userId))
+        if (userIdClaim == null || !Guid.TryParse(userIdClaim, out var userId))
             return Unauthorized();
 
         var user = await _authService.ValidateTokenAsync(userId);
