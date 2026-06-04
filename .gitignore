@@ -436,3 +436,4 @@ FodyWeavers.xsd
 *.msix
 *.msm
 *.msp
+/Lms.Auth/Lms.Auth.Application/Interfaces/IServiceBusPublisher.cs
